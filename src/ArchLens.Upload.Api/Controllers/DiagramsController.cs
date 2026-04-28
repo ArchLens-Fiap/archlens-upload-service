@@ -1,4 +1,5 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Security.Claims;
+using System.Text.RegularExpressions;
 using ArchLens.Upload.Api.Filters;
 using ArchLens.Upload.Application.UseCases.Diagrams.Commands.Upload;
 using ArchLens.Upload.Application.UseCases.Diagrams.Queries.GetStatus;
@@ -16,6 +17,9 @@ namespace ArchLens.Upload.Api.Controllers;
 [Authorize]
 public sealed class DiagramsController(ISender sender, IDiagramUploadRepository diagramRepo, ArchLens.SharedKernel.Domain.IUnitOfWork unitOfWork, IFileStorageService fileStorage) : ControllerBase
 {
+    private string? GetCurrentUserId() => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+    private bool IsAdmin() => User.IsInRole("Admin");
+
     [HttpPost]
     [ValidateFileSignature]
     [RequestSizeLimit(20 * 1024 * 1024)]
@@ -29,7 +33,8 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
             file.OpenReadStream(),
             safeFileName,
             file.ContentType,
-            file.Length);
+            file.Length,
+            GetCurrentUserId());
 
         var result = await sender.Send(command, cancellationToken);
 
@@ -56,6 +61,9 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
             return NotFound(new { error = result.Error.Code, message = result.Error.Description });
         }
 
+        if (!IsAdmin() && result.Value.UserId != GetCurrentUserId())
+            return NotFound();
+
         return Ok(result.Value);
     }
 
@@ -71,6 +79,9 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
             return NotFound(new { error = result.Error.Code, message = result.Error.Description });
         }
 
+        if (!IsAdmin() && result.Value.UserId != GetCurrentUserId())
+            return NotFound();
+
         return Ok(result.Value);
     }
 
@@ -81,6 +92,9 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
     {
         var diagram = await diagramRepo.GetByIdAsync(id, cancellationToken);
         if (diagram is null) return NotFound();
+
+        if (!IsAdmin() && diagram.UserId != GetCurrentUserId())
+            return NotFound();
 
         var stream = await fileStorage.DownloadAsync(diagram.StoragePath, cancellationToken);
         return File(stream, diagram.FileType, diagram.FileName);
@@ -93,7 +107,7 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var result = await sender.Send(new ListDiagramsQuery(page, pageSize), cancellationToken);
+        var result = await sender.Send(new ListDiagramsQuery(page, pageSize, GetCurrentUserId(), false), cancellationToken);
         return Ok(result.Value);
     }
 
@@ -104,6 +118,9 @@ public sealed class DiagramsController(ISender sender, IDiagramUploadRepository 
     {
         var diagram = await diagramRepo.GetByIdAsync(id, cancellationToken);
         if (diagram is null) return NotFound();
+
+        if (!IsAdmin() && diagram.UserId != GetCurrentUserId())
+            return NotFound();
 
         await diagramRepo.DeleteAsync(diagram, cancellationToken);
         await unitOfWork.SaveChangesAsync(cancellationToken);

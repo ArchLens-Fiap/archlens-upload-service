@@ -14,8 +14,10 @@ public sealed class ListDiagramsHandler(
     {
         var paged = new PagedRequest(request.Page, request.PageSize);
 
+        var effectiveUserId = request.IsAdmin ? null : request.UserId;
+
         var (items, totalCount) = await repository.GetPagedAsync(
-            paged.Skip, paged.PageSize, request.UserId, cancellationToken);
+            paged.Skip, paged.PageSize, effectiveUserId, cancellationToken);
 
         var dtos = items.Select(d => new DiagramStatusResponse(
             d.Id,
